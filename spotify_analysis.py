@@ -29,6 +29,9 @@ def _():
     import numpy as np
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from sklearn.dummy import DummyRegressor
+    from sklearn.metrics import r2_score
+    from sklearn.linear_model import LinearRegression
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.metrics import mean_absolute_error
     from sklearn.model_selection import train_test_split
@@ -42,11 +45,14 @@ def _():
 
     return (
         DecisionTreeRegressor,
+        DummyRegressor,
+        LinearRegression,
         RandomForestRegressor,
         mean_absolute_error,
         np,
         pd,
         plt,
+        r2_score,
         sns,
         train_test_split,
     )
@@ -54,7 +60,7 @@ def _():
 
 @app.cell
 def _(pd):
-    spotify_raw = pd.read_csv(r"C:\Users\posion\marimo_notebooks\__datasets__\spotify_data.csv")
+    spotify_raw = pd.read_csv(r"C:\Users\posion\marimo_notebooks\__datasets__\spotify_data.csv", index_col=0)
     spotify_raw.head()
     return (spotify_raw,)
 
@@ -108,12 +114,109 @@ def _(spotify_raw):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Целевая переменная и признаки (модель №1, только числовые фичи)
+    ## Линейная регрессия.
 
     Контекст: EDA уже проведён, известно, какие признаки связаны с
     популярностью. Формально выделяем целевую переменную `y` (`popularity`)
     и матрицу признаков `X`, используя колонки: `danceability`, `energy`,
     `acousticness`, `valence`, `tempo`, `loudness`, `speechiness`.
+    """)
+    return
+
+
+@app.cell
+def _(spotify):
+    features_line = ['danceability', 'energy', 'acousticness', 'valence',
+        'tempo', 'loudness', 'speechiness']
+
+    y_line = spotify['popularity']
+    X_line = spotify[features_line]
+    return X_line, features_line, y_line
+
+
+@app.cell
+def _(X_line, train_test_split, y_line):
+    train_X_line, test_X_line, train_y_line, test_y_line = train_test_split(X_line, y_line, random_state=1)
+    return test_X_line, test_y_line, train_X_line, train_y_line
+
+
+@app.cell
+def _(
+    LinearRegression,
+    features_line,
+    mean_absolute_error,
+    pd,
+    r2_score,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
+):
+    model_line = LinearRegression()
+    model_line.fit(train_X_line, train_y_line)
+    preds_line = model_line.predict(test_X_line)
+    print(f'R2-SCORE: {r2_score(test_y_line, preds_line)}')
+    print(f'MAE: {mean_absolute_error(test_y_line, preds_line)}')
+
+
+    print(pd.DataFrame({
+        "Features" : features_line,
+        "Coeff": model_line.coef_
+    }).sort_values('Coeff'))
+    return (preds_line,)
+
+
+@app.cell
+def _(
+    DummyRegressor,
+    mean_absolute_error,
+    r2_score,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
+):
+    baseline = DummyRegressor(strategy='mean')
+    baseline.fit(train_X_line, train_y_line)
+    preds_base = baseline.predict(test_X_line)
+    print(f"MAE: {mean_absolute_error(test_y_line, preds_base)}")
+    print(f"R2: {r2_score(test_y_line, preds_base)}")
+    return
+
+
+@app.cell
+def _(plt, preds_line, sns, test_y_line):
+    plt.figure(figsize=(8,6))
+    sns.scatterplot(x=test_y_line, 
+                    y=preds_line)
+    plt.xlabel("Настоящая популярность")
+    plt.ylabel('Предсказенная популярность')
+    plt.plot([0,100], [0,100], "r--")
+    plt.show()
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### R2-SCORE и График
+
+    Мы наблюдаем, что показатель r2 очень маленький, что говорит нам о том, что между аудио-признаками и популярностью трека, очень маленькая корреляция. Поэтому стоит использовать другие признаки, такие как артиста или жанр треков. Но изначально их, нужно превратить в категориальные данные. Погрешность модели примерно в районе 17, что говорит нам о том, что модель почти не даёт улучшения по сравнению с базовой моделью. Также мы наблюдаем, как признаки влияют на популярность, но у них разный числовой диапазон, что можно исправить добавлением z-score.
+    """)
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Анасамбли. Рандомный лес и Дерево решений
+
+    Контекст: Берем те же признаки, что и прошлый раз, чтобы посмотреть, какой будет погрешность модели теперь
     """)
     return
 
@@ -137,7 +240,7 @@ def _(X_1, train_test_split, y_1):
     return train_X_1, train_y_1, val_X_1, val_y_1
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     mo.md(r"""
     ### Подбор глубины дерева решений (число листьев)
