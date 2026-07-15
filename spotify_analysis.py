@@ -30,6 +30,8 @@ def _():
     import matplotlib.pyplot as plt
     import seaborn as sns
     from sklearn.dummy import DummyRegressor
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.neighbors import KNeighborsRegressor
     from sklearn.metrics import r2_score
     from sklearn.linear_model import LinearRegression
     from sklearn.ensemble import RandomForestRegressor
@@ -46,8 +48,10 @@ def _():
     return (
         DecisionTreeRegressor,
         DummyRegressor,
+        KNeighborsRegressor,
         LinearRegression,
         RandomForestRegressor,
+        StandardScaler,
         mean_absolute_error,
         np,
         pd,
@@ -75,10 +79,10 @@ def _(mo):
 
     - В `artists` 1 пропуск заменили на `"Unknown Artist"`
     - В `album_name` 1 пропуск заменили на `"Unknown Album"`
-    - После этого удалили дубликаты по `track_id`
+    - После этого удалили дубликаты по `признакам для будущих моделей`
 
-    В итоге количество строк уменьшилось со 114000 до 89741 — убрали
-    повторяющиеся треки.
+    В итоге количество строк уменьшилось со 114000 до 83448 — убрали
+    повторяющиеся треки с одинаковыми признаками.
 
     Здесь же сразу переименовываю столбцы (`track_name → song`,
     `artists → artist`, `track_genre → genre`) — в исходном ноутбуке это
@@ -87,7 +91,7 @@ def _(mo):
     дальше было последовательно и ничего не падало по `KeyError`.
 
     **Вывод:** после очистки данные стали более надёжными для анализа и
-    исключили повторяющиеся записи.
+    исключили повторяющиеся записи. Исключая утечку данных, где модель подсматривала бы повторяющийся треки
     """)
     return
 
@@ -95,11 +99,13 @@ def _(mo):
 @app.cell
 def _(spotify_raw):
     missing_count = spotify_raw.isnull().sum()
+    _dedup_cols = ['danceability', 'energy', 'acousticness', 'valence',
+                   'tempo', 'loudness', 'speechiness']
 
     replacement_artist = spotify_raw.artists.fillna("Unknown Artist")
     replacement_album = spotify_raw.album_name.fillna("Unknown Album_name")
 
-    spotify = spotify_raw.drop_duplicates(subset=["track_id"])
+    spotify = spotify_raw.drop_duplicates(subset=_dedup_cols)
     spotify = spotify.rename(
         columns={
             'track_name': 'song',
@@ -201,13 +207,81 @@ def _(mo):
     mo.md(r"""
     ### R2-SCORE и График
 
-    Мы наблюдаем, что показатель r2 очень маленький, что говорит нам о том, что между аудио-признаками и популярностью трека, очень маленькая корреляция. Поэтому стоит использовать другие признаки, такие как артиста или жанр треков. Но изначально их, нужно превратить в категориальные данные. Погрешность модели примерно в районе 17, что говорит нам о том, что модель почти не даёт улучшения по сравнению с базовой моделью. Также мы наблюдаем, как признаки влияют на популярность, но у них разный числовой диапазон, что можно исправить добавлением z-score.
+    Мы наблюдаем, что показатель r2 очень маленький, что говорит нам о том, что между аудио-признаками и популярностью трека, очень маленькая корреляция. Поэтому стоит использовать другие признаки, такие как артиста или жанр треков. Но изначально их, нужно превратить в категориальные данные. Погрешность модели примерно в районе 15, что говорит нам о том, что модель почти не даёт улучшения по сравнению с базовой моделью. Также мы наблюдаем, как признаки влияют на популярность, но у них разный числовой диапазон, что можно исправить добавлением z-score.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Метод ближайших соседей.
+
+    Добавляем StandardScaler для того, чтобы стандатизировать данные из разных признаков, по той причине, что в разных признаках может быть числовой диапазон разный.
     """)
     return
 
 
 @app.cell
-def _():
+def _(StandardScaler, train_X_1, val_X_1):
+    scaler = StandardScaler()
+    train_X_scaled = scaler.fit_transform(train_X_1)
+    val_X_scaled = scaler.transform(val_X_1)
+    return train_X_scaled, val_X_scaled
+
+
+@app.cell
+def _(
+    KNeighborsRegressor,
+    mean_absolute_error,
+    train_X_scaled,
+    train_y_1,
+    val_X_scaled,
+    val_y_1,
+):
+    knn_model = KNeighborsRegressor(n_neighbors=5)
+    knn_model.fit(train_X_scaled, train_y_1)
+    knn_preds = knn_model.predict(val_X_scaled)
+    print(mean_absolute_error(val_y_1, knn_preds))
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Подсчитываем самое оптимальное количество соседей
+
+    Мы видим, что с возрастанием количество соседей для регрессивного метода ближайших соседей увеличивается, также и погрешность модели. С чем это связано пока неизвестно
+    """)
+    return
+
+
+@app.cell
+def _(
+    KNeighborsRegressor,
+    mean_absolute_error,
+    train_X_scaled,
+    train_y_1,
+    val_X_scaled,
+    val_y_1,
+):
+    neighbors = [1, 2, 3, 4, 5, 7, 10, 20, 50, 100]
+    for neighbor in neighbors:
+        knn_model_1 = KNeighborsRegressor(n_neighbors=neighbor)
+        knn_model_1.fit(train_X_scaled, train_y_1)
+        knn_preds_1 = knn_model_1.predict(val_X_scaled)
+        mae = mean_absolute_error(val_y_1, knn_preds_1)
+        print(f"Соседи: {neighbor} \t Погрешность: {mae:.2f}")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Мы наблюдаем, что метод ближайших соседей не имеет сильного влияния по сравнению с линейной ригресси.
+
+    С ростом числа соседей погрешность модели снижается — усреднение по большему числу соседей уменьшает влияние шума отдельных наблюдений (снижение дисперсии). Оптимальным оказалось k=50 (MAE≈14.91). При дальнейшем росте k модель начинает недообучаться — усреднение по слишком большому числу соседей размывает локальные закономерности данных.
+    """)
     return
 
 
@@ -257,7 +331,7 @@ def _(
     val_X_1,
     val_y_1,
 ):
-    candidatea_max_leaf_nodes = [5, 20, 50, 100, 500]
+    candidatea_max_leaf_nodes = [5, 10, 50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000]
 
     def get_most_lead(max_leaf_nodes, train_X, val_X, train_y, val_y):
         spot_model = DecisionTreeRegressor(max_leaf_nodes=max_leaf_nodes, random_state=0)
@@ -281,10 +355,10 @@ def _(
     val_X_1,
     val_y_1,
 ):
-    spot_model_default = DecisionTreeRegressor(random_state=1)
+    spot_model_default = DecisionTreeRegressor(max_leaf_nodes=5, random_state=1)
     spot_model_default.fit(train_X_1, train_y_1)
     val_prediction_default = spot_model_default.predict(val_X_1)
-    print("Плохая погрешность: {:,.0f}".format(mean_absolute_error(val_prediction_default, val_y_1)))
+    print("Плохая погрешность: {:,.2f}".format(mean_absolute_error(val_prediction_default, val_y_1)))
     return
 
 
@@ -313,7 +387,7 @@ def _(mo):
     Дерево с 500 листьями показало наименьший MAE, с 5 листьями — самый
     большой (недообучение). Но погрешность всё ещё слишком высока, чтобы
     считать модель точной — поэтому дальше пробуем случайный лес вместо
-    одного дерева.
+    одного дерева. Также мы видим, что после 1500 листьев идет переобучение модели. Поэтому самым оптимальным для нас вариантом остается дерево с 500 листьями. Решающие деревья не показали столь сильного роста, сравнивая с методом ближайших соседей.
     """)
     return
 
@@ -337,7 +411,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Случайный лес дал MAE ниже примерно на 2 пункта — хороший результат.
+    Случайный лес дал MAE примерно такой же результат. Во всех моделях коррелирует в основном одно число в диапазоне от 14 до 16, не давая никакой прироста с базовой моделью.
     Дальше пробуем добавить ещё один признак, напрямую коррелирующий с
     треками — жанр (`genre`).
 
@@ -372,6 +446,8 @@ def _(RandomForestRegressor, mean_absolute_error, spotify):
 def _(mo):
     mo.md(r"""
     ### Кодирование категориального признака `genre`
+
+    Использование категорильного признака с ordinal возможна только на решающих деревьях и рандомном лесе, так как в остальных моделях такая кодировка не подходит.
     """)
     return
 
@@ -458,8 +534,8 @@ def _(mo):
     mo.md(r"""
     Добавлен новый признак — жанры треков. Так как это был текстовый
     (object) признак, превратили его в категориальный через
-    `OrdinalEncoder`. С random forest (50 деревьев) MAE получился **~10.3**
-    — заметно точнее, чем без жанра. Все три способа чистки пропусков дали
+    `OrdinalEncoder`. С random forest (50 деревьев) MAE получился **~11.18**
+    — это меньше на 4 пункта с простым рандомным лесом, что показывает о том, что корреляция жанром трека и его популярностью весьма сильная. Все три способа чистки пропусков дали
     одинаковый результат, потому что пропусков в этих строках на самом деле
     не было — что подтверждает последняя проверка `isnull().sum()`.
 
@@ -534,8 +610,7 @@ def _(X_2, clf, y_2):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Кросс-валидация не улучшила результат — дальше используем обычную
-    валидацию, кросс-валидация лишь отнимает время.
+    Кросс-валидация не улучшила результат, но позволяет нам удостоверится в правдивости данных, так как проверка была по группам.
 
     ### XGBoost
     """)
@@ -699,9 +774,9 @@ def _(spotify):
         else:
             return 'Neutral'
 
-    spotify['mood'] = spotify.apply(Mood_Valence, axis='columns')
+    spotify['mood'] = spotify.apply(Mood_Valence, axis=1)
 
-    mood_count = spotify.groupby('mood').value_counts()
+    mood_count = spotify.groupby('mood').size()
     mood_count
     return
 
@@ -870,12 +945,6 @@ def _(np, spotify):
 
     standardized_data = (mtx - mean) / std
     spotify.groupby('popular_hit')[['energy', 'danceability', 'valence']].mean()
-    return
-
-
-@app.cell
-def _(spotify):
-    spotify['popular_hit'].value_counts()
     return
 
 
