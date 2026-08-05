@@ -1,11 +1,20 @@
-# gitignore
-__marimo__/
-
-.venv/
+# Python
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
+
+# Marimo
+.marimo/
+__marimo__/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Environment
 .env
 
-.python-version
-main.py
-pyproject.toml
+# Промежуточные/сгенерированные данные (не сырой датасет)
+outputs/*.csv

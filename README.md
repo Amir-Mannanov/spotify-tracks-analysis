@@ -1,2 +1,45 @@
-# spotify-tracks-analysis
-ML-анализ популярности треков Spotify: EDA, Random Forest и XGBoost для предсказания popularity
+# Tracks analysis
+
+
+ML-анализ популярности треков Spotify: исследуем, какие аудио-характеристики
+(danceability, energy, valence и др.) и жанр трека влияют на его популярность.
+Сравниваем несколько моделей — от линейной регрессии до Random Forest и XGBoost —
+и ищем, какие признаки дают наибольший прирост точности предсказания.
+
+## Установка
+
+```bash
+uv sync
+```
+## Данные
+
+Используется датасет Spotify Tracks (114 000 треков, аудио-характеристики +
+метаданные: исполнитель, альбом, жанр, популярность).
+
+Положите файл `spotify_data.csv` в папку `data/` в корне проекта:
+
+## Запуск
+
+```bash
+marimo run notebooks/spotify_analysis.py
+```
+
+Или для редактирования в интерактивном режиме:
+
+```bash
+marimo edit notebooks/spotify_analysis.py
+```
+
+## Что внутри ноутбука
+
+- **Очистка данных**: обработка пропусков, удаление дубликатов по аудио-признакам
+- **EDA**: статистика популярности, распределения по жанрам, настроение треков (mood)
+- **Модели**: Linear Regression, KNN, Decision Tree, Random Forest, XGBoost
+- **Результат**: аудио-признаки сами по себе слабо коррелируют с популярностью
+  (R² низкий), но добавление жанра как признака заметно снижает ошибку
+  (MAE ~11.18 у Random Forest против ~15 без жанра)
+
+## Стек
+
+Python, pandas, numpy, scikit-learn, xgboost, matplotlib, seaborn, marimo, pathlib
+
