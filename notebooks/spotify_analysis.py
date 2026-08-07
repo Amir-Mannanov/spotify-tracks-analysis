@@ -29,6 +29,7 @@ def _():
     import numpy as np
     import matplotlib.pyplot as plt
     import seaborn as sns
+    from xgboost import XGBRegressor
     from sklearn.dummy import DummyRegressor
     from sklearn.preprocessing import StandardScaler
     from sklearn.neighbors import KNeighborsRegressor
@@ -36,6 +37,7 @@ def _():
     from sklearn.linear_model import LinearRegression
     from sklearn.ensemble import RandomForestRegressor
     from sklearn.metrics import mean_absolute_error
+    from sklearn.metrics import mean_squared_error
     from sklearn.model_selection import train_test_split
     from sklearn.tree import DecisionTreeRegressor
     from pathlib import Path
@@ -45,17 +47,43 @@ def _():
         DummyRegressor,
         KNeighborsRegressor,
         LinearRegression,
+        Path,
         RandomForestRegressor,
         StandardScaler,
+        XGBRegressor,
         mean_absolute_error,
+        mean_squared_error,
         np,
         pd,
         plt,
         r2_score,
         sns,
         train_test_split,
-        Path
     )
+
+
+@app.cell
+def _(mean_absolute_error, mean_squared_error, r2_score):
+    class ModelEvaluator:
+        def __init__(self, model, X_train, y_train, X_val, y_val):
+            self.model = model
+            self.X_train = X_train
+            self.y_train = y_train
+            self.X_val = X_val
+            self.y_val = y_val
+        def train(self):
+            self.model.fit(self.X_train, self.y_train)
+            return self
+        def evaluate(self):
+            self.preds_ = self.model.predict(self.X_val)
+            return {
+                "model": type(self.model).__name__,
+                "MAE": mean_absolute_error(self.y_val, self.preds_),
+                "MSE": mean_squared_error(self.y_val, self.preds_),
+                "R2": r2_score(self.y_val, self.preds_),
+            }
+
+    return (ModelEvaluator,)
 
 
 @app.cell
@@ -73,7 +101,6 @@ def _():
     hit_threshold = 70
     mood_happy = 0.7
     mood_sad = 0.3
-
     return (
         base_features,
         features_with_genre,
@@ -89,7 +116,7 @@ def _():
 
 
 @app.cell
-def _(pd, Path):
+def _(Path, pd):
     BASE_DIR = Path(__file__).resolve().parent
     DATA_PATH = BASE_DIR.parent / "data" / "spotify_data.csv"
     spotify_raw = pd.read_csv(DATA_PATH, index_col=0)
@@ -169,53 +196,39 @@ def _(X_line, random_state, train_test_split, y_line):
 
 @app.cell
 def _(
-    LinearRegression,
-    base_features,
-    mean_absolute_error,
-    pd,
-    r2_score,
-    test_X_line,
-    test_y_line,
-    train_X_line,
-    train_y_line,
-):
-    model_line = LinearRegression()
-    model_line.fit(train_X_line, train_y_line)
-    preds_line = model_line.predict(test_X_line)
-    print(f'R2-SCORE: {r2_score(test_y_line, preds_line)}')
-    print(f'MAE: {mean_absolute_error(test_y_line, preds_line)}')
-
-
-    print(pd.DataFrame({
-        "Features" : base_features,
-        "Coeff": model_line.coef_
-    }).sort_values('Coeff'))
-    return (preds_line,)
-
-
-@app.cell
-def _(
     DummyRegressor,
-    mean_absolute_error,
-    r2_score,
+    ModelEvaluator,
     test_X_line,
     test_y_line,
     train_X_line,
     train_y_line,
 ):
-    baseline = DummyRegressor(strategy='mean')
-    baseline.fit(train_X_line, train_y_line)
-    preds_base = baseline.predict(test_X_line)
-    print(f"MAE: {mean_absolute_error(test_y_line, preds_base)}")
-    print(f"R2: {r2_score(test_y_line, preds_base)}")
+    base_model = ModelEvaluator(DummyRegressor(strategy='mean'), train_X_line, train_y_line, test_X_line, test_y_line).train().evaluate()
+    print(base_model)
     return
 
 
 @app.cell
-def _(plt, preds_line, sns, test_y_line):
+def _(
+    LinearRegression,
+    ModelEvaluator,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
+):
+    model_line = ModelEvaluator(LinearRegression(), train_X_line, train_y_line, test_X_line, test_y_line)
+    model_line.train()
+    result_line = model_line.evaluate()
+    print(result_line)
+    return (model_line,)
+
+
+@app.cell
+def _(model_line, plt, sns, test_y_line):
     plt.figure(figsize=(8,6))
     sns.scatterplot(x=test_y_line, 
-                    y=preds_line)
+                    y=model_line.preds_)
     plt.xlabel("Настоящая популярность")
     plt.ylabel('Предсказенная популярность')
     plt.plot([0,100], [0,100], "r--")
@@ -244,27 +257,23 @@ def _(mo):
 
 
 @app.cell
-def _(StandardScaler, train_X_1, val_X_1):
-    scaler = StandardScaler()
-    train_X_scaled = scaler.fit_transform(train_X_1)
-    val_X_scaled = scaler.transform(val_X_1)
-    return train_X_scaled, val_X_scaled
-
-
-@app.cell
 def _(
     KNeighborsRegressor,
-    mean_absolute_error,
-    train_X_scaled,
-    train_y_1,
-    val_X_scaled,
-    val_y_1,
+    ModelEvaluator,
+    StandardScaler,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
 ):
-    knn_model = KNeighborsRegressor(n_neighbors=5)
-    knn_model.fit(train_X_scaled, train_y_1)
-    knn_preds = knn_model.predict(val_X_scaled)
-    print(mean_absolute_error(val_y_1, knn_preds))
-    return
+    scaler = StandardScaler()
+    train_X_scaled = scaler.fit_transform(train_X_line)
+    val_X_scaled = scaler.transform(test_X_line)
+
+
+    knn_model = ModelEvaluator(KNeighborsRegressor(n_neighbors=5), train_X_scaled, train_y_line, val_X_scaled, test_y_line).train().evaluate()
+    print(knn_model)
+    return train_X_scaled, val_X_scaled
 
 
 @app.cell(hide_code=True)
@@ -280,19 +289,16 @@ def _(mo):
 @app.cell
 def _(
     KNeighborsRegressor,
-    mean_absolute_error,
+    ModelEvaluator,
+    test_y_line,
     train_X_scaled,
-    train_y_1,
+    train_y_line,
     val_X_scaled,
-    val_y_1,
 ):
     neighbors = [1, 2, 3, 4, 5, 7, 10, 20, 50, 100]
     for neighbor in neighbors:
-        knn_model_1 = KNeighborsRegressor(n_neighbors=neighbor)
-        knn_model_1.fit(train_X_scaled, train_y_1)
-        knn_preds_1 = knn_model_1.predict(val_X_scaled)
-        mae = mean_absolute_error(val_y_1, knn_preds_1)
-        print(f"Соседи: {neighbor} \t Погрешность: {mae:.2f}")
+        knn_model_update = ModelEvaluator(KNeighborsRegressor(n_neighbors=neighbor), train_X_scaled, train_y_line, val_X_scaled, test_y_line).train().evaluate()
+        print(f"Соседи: {neighbor} \t Погрешность: {knn_model_update['MAE']:.2f}")
     return
 
 
@@ -317,21 +323,6 @@ def _(mo):
 
 
 @app.cell
-def _(base_features, spotify, target):
-    y_1 = spotify[target]
-    X_1 = spotify[base_features]
-    print(X_1.shape, y_1.shape)
-    X_1.head()
-    return X_1, y_1
-
-
-@app.cell
-def _(X_1, random_state, train_test_split, y_1):
-    train_X_1, val_X_1, train_y_1, val_y_1 = train_test_split(X_1, y_1, random_state=random_state)
-    return train_X_1, train_y_1, val_X_1, val_y_1
-
-
-@app.cell
 def _(mo):
     mo.md(r"""
     ### Подбор глубины дерева решений (число листьев)
@@ -342,23 +333,20 @@ def _(mo):
 @app.cell
 def _(
     DecisionTreeRegressor,
-    mean_absolute_error,
-    train_X_1,
-    train_y_1,
-    val_X_1,
-    val_y_1,
+    ModelEvaluator,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
 ):
     candidate_max_leaf_nodes = [5, 10, 50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 4000]
 
     def get_mae(max_leaf_nodes, train_X, val_X, train_y, val_y):
-        spot_model = DecisionTreeRegressor(max_leaf_nodes=max_leaf_nodes, random_state=0)
-        spot_model.fit(train_X, train_y)
-        val_predictions = spot_model.predict(val_X)
-        mae = mean_absolute_error(val_y, val_predictions)
-        return mae
+        decision_model = ModelEvaluator(DecisionTreeRegressor(max_leaf_nodes=max_leaf_nodes, random_state=0), train_X, train_y, val_X, val_y).train().evaluate()
+        return decision_model["MAE"]
 
     for max_leaf_nodes in candidate_max_leaf_nodes:
-        mae = get_mae(max_leaf_nodes, train_X_1, val_X_1, train_y_1, val_y_1)
+        mae = get_mae(max_leaf_nodes, train_X_line, train_y_line, test_X_line, test_y_line)
         print("Листья: %d \t\t Погрешность: %d" % (max_leaf_nodes, mae))
     return
 
@@ -366,34 +354,28 @@ def _(
 @app.cell
 def _(
     DecisionTreeRegressor,
-    mean_absolute_error,
-    random_state,
-    train_X_1,
-    train_y_1,
-    val_X_1,
-    val_y_1,
+    ModelEvaluator,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
 ):
-    spot_model_default = DecisionTreeRegressor(max_leaf_nodes=5, random_state=random_state)
-    spot_model_default.fit(train_X_1, train_y_1)
-    val_predictions_default = spot_model_default.predict(val_X_1)
-    print("Плохая погрешность: {:,.2f}".format(mean_absolute_error(val_predictions_default, val_y_1)))
+    decision_model_default = ModelEvaluator(DecisionTreeRegressor(max_leaf_nodes=5, random_state=0), train_X_line, train_y_line, test_X_line, test_y_line).train().evaluate()
+    print(f"Плохая погрешность: {decision_model_default}")
     return
 
 
 @app.cell
 def _(
     DecisionTreeRegressor,
-    mean_absolute_error,
-    random_state,
-    train_X_1,
-    train_y_1,
-    val_X_1,
-    val_y_1,
+    ModelEvaluator,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
 ):
-    spot_model_500 = DecisionTreeRegressor(max_leaf_nodes=500, random_state=random_state)
-    spot_model_500.fit(train_X_1, train_y_1)
-    val_predictions_500 = spot_model_500.predict(val_X_1)
-    print("Лучшая погрешность: ", (mean_absolute_error(val_predictions_500, val_y_1)))
+    decision_model_top = ModelEvaluator(DecisionTreeRegressor(max_leaf_nodes=500, random_state=0), train_X_line, train_y_line, test_X_line, test_y_line).train().evaluate()
+    print(f"Лучшая погрешность: {decision_model_top}")
     return
 
 
@@ -413,20 +395,18 @@ def _(mo):
 
 @app.cell
 def _(
+    ModelEvaluator,
     RandomForestRegressor,
-    mean_absolute_error,
     n_jobs,
     random_state,
     rf_n_estimators,
-    train_X_1,
-    train_y_1,
-    val_X_1,
-    val_y_1,
+    test_X_line,
+    test_y_line,
+    train_X_line,
+    train_y_line,
 ):
-    rf_model_0 = RandomForestRegressor(n_estimators=rf_n_estimators, random_state=random_state, n_jobs=n_jobs)
-    rf_model_0.fit(train_X_1, train_y_1)
-    rf_prediction_0 = rf_model_0.predict(val_X_1)
-    print(mean_absolute_error(val_y_1, rf_prediction_0))
+    random_forest_model = ModelEvaluator(RandomForestRegressor(n_estimators=rf_n_estimators, random_state=random_state, n_jobs=n_jobs), train_X_line, train_y_line, test_X_line, test_y_line).train().evaluate()
+    print(random_forest_model)
     return
 
 
@@ -443,7 +423,16 @@ def _(mo):
 
 
 @app.cell
-def _(RandomForestRegressor, features_with_genre, mean_absolute_error, n_jobs, random_state, rf_n_estimators, spotify, target):
+def _(
+    ModelEvaluator,
+    RandomForestRegressor,
+    features_with_genre,
+    n_jobs,
+    random_state,
+    rf_n_estimators,
+    spotify,
+    target,
+):
     y_2 = spotify[target]
     X_2 = spotify[features_with_genre].copy()
     X_2['genre'] = X_2['genre'].astype(object)
@@ -451,10 +440,8 @@ def _(RandomForestRegressor, features_with_genre, mean_absolute_error, n_jobs, r
     categorical_cols = [col for col in X_2.columns if X_2[col].dtype == 'object']
 
     def score_dataset(train_X, val_X, train_y, val_y):
-        rf_model = RandomForestRegressor(n_estimators=rf_n_estimators, random_state=random_state, n_jobs=n_jobs)
-        rf_model.fit(train_X, train_y)
-        rf_prediction = rf_model.predict(val_X)
-        return mean_absolute_error(val_y, rf_prediction)
+        rf_score = ModelEvaluator(RandomForestRegressor(n_estimators=rf_n_estimators, random_state=random_state, n_jobs=n_jobs), train_X, train_y, val_X, val_y).train().evaluate()
+        return rf_score["MAE"]
 
     return X_2, categorical_cols, numerical_cols, score_dataset, y_2
 
@@ -637,48 +624,23 @@ def _(mo):
 
 
 @app.cell
-def _(mean_absolute_error, train_X_2, train_y_2, val_X_2, val_y_2):
-    from xgboost import XGBRegressor
-
-    my_model_1 = XGBRegressor(random_state=0)
-    my_model_1.fit(train_X_2, train_y_2)
-
-    predictions_1 = my_model_1.predict(val_X_2)
-    print(mean_absolute_error(val_y_2, predictions_1))
-    return (XGBRegressor,)
-
-
-@app.cell
-def _(
-    XGBRegressor,
-    mean_absolute_error,
-    train_X_2,
-    train_y_2,
-    val_X_2,
-    val_y_2,
-):
-    my_model_2 = XGBRegressor(n_estimators=100, learning_rate=0.05)
-    my_model_2.fit(train_X_2, train_y_2)
-
-    predictions_2 = my_model_2.predict(val_X_2)
-    print(mean_absolute_error(val_y_2, predictions_2))
+def _(ModelEvaluator, XGBRegressor, train_X_2, train_y_2, val_X_2, val_y_2):
+    xgboost_model1 = ModelEvaluator(XGBRegressor(random_state=0), train_X_2, train_y_2, val_X_2, val_y_2).train().evaluate()
+    print(xgboost_model1)
     return
 
 
 @app.cell
-def _(
-    XGBRegressor,
-    mean_absolute_error,
-    train_X_2,
-    train_y_2,
-    val_X_2,
-    val_y_2,
-):
-    my_model_3 = XGBRegressor(n_estimators=1000, learning_rate=0.03)
-    my_model_3.fit(train_X_2, train_y_2)
+def _(ModelEvaluator, XGBRegressor, train_X_2, train_y_2, val_X_2, val_y_2):
+    xgboost_model2= ModelEvaluator(XGBRegressor(n_estimators=100, learning_rate=0.05), train_X_2, train_y_2, val_X_2, val_y_2).train().evaluate()
+    print(xgboost_model2)
+    return
 
-    predictions_3 = my_model_3.predict(val_X_2)
-    print(mean_absolute_error(val_y_2, predictions_3))
+
+@app.cell
+def _(ModelEvaluator, XGBRegressor, train_X_2, train_y_2, val_X_2, val_y_2):
+    xgboost_model3= ModelEvaluator(XGBRegressor(n_estimators=1000, learning_rate=0.03), train_X_2, train_y_2, val_X_2, val_y_2).train().evaluate()
+    print(xgboost_model3)
     return
 
 
